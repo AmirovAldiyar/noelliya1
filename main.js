@@ -1,7 +1,10 @@
 peg = require("./grammar");
-peg.parse(`var v int := 1;
-func main(a int) {
-    print v;
-}
-main(123);
-`);
+const fs = require("fs");
+
+fs.readFile("./main.kwa", "utf8", (err, data) => {
+  if (err) {
+    console.error(err);
+    return;
+  }
+  peg.parse(data);
+});

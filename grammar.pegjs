@@ -1,4 +1,7 @@
 {
+
+    const ps = require('prompt-sync')
+    const prompt = ps()
     const consts = require("./const")
     let utils = require("./utils")
     var vars = new Map()
@@ -7,7 +10,8 @@
     let scopeHistory = []
     let tmpScope = ""
     let blockStack = []
-    let returned = undefined
+    let returned = [false, undefined]
+    let lastType = undefined
     
     function declarationValue(ctx, ident, type, value) {
         if(type != value.type) {
@@ -342,9 +346,10 @@
     }
 
     function add(location, op, value1, value2) {
+        let res
         switch (op) {
             case "+":
-                let res = { value: value1.value + value2.value, type: consts.TYPE_INT}
+                res = { value: value1.value + value2.value, type: consts.TYPE_INT}
                 if (value1.type == consts.TYPE_FLOAT || value2.type == consts.TYPE_FLOAT) {
                     res.type = consts.TYPE_FLOAT
                 }
@@ -405,7 +410,7 @@
         if (type == undefined) {
             return [undefined, `${location.start.line}:${location.start.column} variable ${ident} is not declared in the scope`]
         }
-        return [type, undefined]
+        return [type, undefined, variable]
     }
     function ifcheck(location, expr, block) {
         return (history, scope) => {
@@ -416,7 +421,9 @@
             if (val[0] != consts.TYPE_BOOL) {
                 return `${location.start.line}:${location.start.column} expression should evaluate to boolean`
             }
+            blockStack.push("block")
             let blockCheck = block[0](history, scope)
+            blockStack.pop()
             if(blockCheck != undefined) {
                 return blockCheck
             }
@@ -433,11 +440,15 @@
                 return `${location.start.line}:${location.start.column} expression should evaluate to boolean`
             }
             let err = ""
+            blockStack.push("block")
             let blockCheck = block[0](history, scope)
+            blockStack.pop()
             if(blockCheck != undefined) {
                 err = err + blockCheck
             }
+            blockStack.push("block")
             let blockCheck2 = block2[0](history, scope)
+            blockStack.pop()
             if(blockCheck2 != undefined) {
                 err = err + "\n" + blockCheck2
             }
@@ -451,7 +462,10 @@
         return (history,scope) => {
             let val = expr[1](history, scope)
             if (val.value == true) {
-                return block[1](history, scope)
+                blockStack.push("block")
+                let res = block[1](history, scope)
+                blockStack.pop()
+                return res
             }
             return undefined
         }
@@ -460,18 +474,28 @@
         return (history,scope) => {
             let val = expr[1](history, scope)
             if (val.value == true) {
-                return block[1](history, scope)
-            } 
-            return block2[1](history,scope)
+                blockStack.push("block")
+                let res = block[1](history, scope)
+                blockStack.pop()
+                return res
+            }
+            blockStack.push("block")
+            let res = block2[1](history, scope)
+            blockStack.pop()
+            return res
         }
     }
 }
 
 start
-  = program
+  = _ program _
 
 program 
     = r:statementsList { 
+        setCompVar("0", "input", {type: consts.TYPE_STRING, params: []})
+        setVar("0", "input", {type: consts.TYPE_STRING, params: [], value: (history, scope) => {
+            return {type: consts.TYPE_STRING, value: prompt("")}
+        }})
         let hasError = false
         let report = []
         for(let i = 0; i < r[0].length; i ++) {
@@ -496,11 +520,30 @@ program
      }
 
 ifstatement
-    = "if" _ "("_ expr:expression _ ")" _ block1:block _ "else" _ block2:block { return [ifElsecheck(location(), expr, block1, block2), ifElseState(location(), expr, block1, block2)]}
-    / "if" _ "(" _ expr:expression _")" block:block {return [ifcheck(location(), expr, block), ifState(location(), expr, block)]}
-
+    = "if" _ "(" _ expr:expression _")" _ block:block _ {return [ifcheck(location(), expr, block), ifState(location(), expr, block)]}
+    / "if" _ "("_ expr:expression _ ")" _ block1:block _ "else" _ block2:block { return [ifElsecheck(location(), expr, block1, block2), ifElseState(location(), expr, block1, block2)]}
+    
 funccall
-    = ident:ident _ "(" _ args:arglist _ ")" _ ";" { let locat = location(); 
+    = ident:ident _ "(" _ ")" _ ";" _ {
+        let locat = location(); 
+        return [(history, scope) => {
+            let func = getCompVar(history, scope, ident)
+            if (func == undefined) {
+                return `${locat.start.line}:${locat.start.column} function ${ident} was not declared in the scope`
+            }
+            if (func.params == undefined) {
+                return `${locat.start.line}:${locat.start.column} ${ident} is not a function`
+            }
+            return undefined;
+        }, (history, scope) => {
+            let func = getVar(history, scope, ident)
+            blockStack.push("func")
+            let res = func.value(history, scope, [])
+            blockStack.pop()
+            return res
+        }]
+    }
+    / ident:ident _ "(" _ args:arglist _ ")" _ ";" { let locat = location(); 
         return [(history, scope) => {
             let func = getCompVar(history, scope, ident)
             if (func == undefined) {
@@ -528,11 +571,11 @@ funccall
             for (let i = 0; i < args.length; i ++) {
                 argList.push([func.params[i][0], func.params[i][1], args[i][1](history, scope).value])
             }
-            return func.value(history, scope, argList)
+            blockStack.push("func")
+            let res = func.value(history, scope, argList)
+            blockStack.pop()
+            return res
         }]
-    }
-    / ident:ident _ "("_")" _ ";" {
-
     }
 
 statementsList
@@ -547,6 +590,7 @@ statement
     / ifstate:ifstatement {return ifstate; }
     / fd:funcdeclare { return fd; }
     / fc:funccall {return fc;}
+    / r:returnstatement {return r;}
 
 declaration
     = "var" __ ident:ident __ type:type _ ":=" _ expr:expression { return [declareCheck(location(), ident, expr, type), declare(location(), ident, expr)]; }
@@ -585,6 +629,13 @@ block
                 if (err != undefined) {
                     return err
                 }
+                if (returned[0]) {
+                    if (blockStack[blockStack.length-1] == "func"){
+                        returned[0] = false
+                        return returned[1]
+                    }
+                    break
+                }
             }
             return undefined
         }
@@ -594,8 +645,11 @@ block
 funcdeclare
     = "func" __ ident:ident _ params:parameters _ type:type _ block:block _ {
         return [(history, scope) => {
-            let check = block[0](history, scope, params)
+            lastType = type
             setCompVar(scope, ident, {params: params, type: type})
+            blockStack.push("func")
+            let check = block[0](history, scope, params)
+            blockStack.pop()
             if (check != undefined) {
                 return check
             }
@@ -607,8 +661,8 @@ funcdeclare
     }
     / "func" __ ident:ident _ params:parameters _ block:block _ {
         return [(history, scope) => {
-            let check = block[0](history, scope, params)
             setCompVar(scope, ident, {params: params, type: consts.TYPE_UNDEFINED})
+            let check = block[0](history, scope, params)
             if (check != undefined) {
                 return check
             }
@@ -625,26 +679,69 @@ ident
 print 
     = "print" __  exp:expression { return [printCheck(location(), exp), print(location(), exp)]; }
 
+
 type
     = "int" { return consts.TYPE_INT; }
     / "string"  { return consts.TYPE_STRING; }
     / "float"  { return consts.TYPE_FLOAT; }
-    / ident { return vars.get(ident).type; } //TODO
 
 value
     = floatliteral 
     / intliteral 
     / stringliteral 
+    / boolliteral
     / functionliteral
+
+
+boolliteral 
+    = "true" { return {
+        value: true,
+        type: consts.TYPE_BOOL,
+    }}
+    / "false" {return {
+        value: false,
+        type: consts.TYPE_BOOL,
+    }
+    }
 
 intliteral
     = digits:[0-9]+ { return utils.makeInt(digits); }
+
+returnstatement
+    = "return" _ ";" { 
+        return [(history, scope) => {
+            return undefined
+        }, 
+        (history, scope) => {
+            returned = [true, undefined]
+            return undefined
+        }]
+    }
+    / "return" _ exp:expression _ ";" { let locat = location();
+        return [(history, scope) => {
+            if(lastType == undefined) {
+                return `${location.start.line}:${location.start.column} function do not return anything`;
+            }
+            let val = exp[0](history,scope)
+            if(val[1] != undefined) {
+                return val[1]
+            }
+            if (lastType != val[0]) {
+                return `${locat.start.line}:${locat.start.column} return type should be ${lastType}, got ${val[0]}`;
+            }
+            return undefined
+        }, 
+        (history, scope) => {
+            returned = [true, exp[1](history, scope)]
+            return undefined
+        }]
+    }
 
 floatliteral
     = intpart:[0-9]+ "." floatpart:[0-9]+ {  return utils.makeFloat(intpart, floatpart); }
    
 stringliteral
-    = '"' str:[0-9a-zA-Z]+ '"' { return utils.makeString(str); }
+    = '"' str:[0-9a-zA-Z ]+ '"' { return utils.makeString(str); }
 
 functionliteral
     = "func" __ parameters _ result _ functionbody 
@@ -678,11 +775,63 @@ arglist
 
 operand 
     = value:value { return [(history, scope) => [value.type, undefined], (history, scope) => value] }
-    / ident:ident { let loc = location(); return [(history, scope) => operandCheckIdent(history, scope, loc, ident), (history, scope) => getVar(history, scope, ident)] }
+    / ident:ident { let loc = location(); return [(history, scope) => operandCheckIdent(history, scope, loc, ident), (history, scope) => {return getVar(history, scope, ident)}] }
 
 primaryexpr
-    = oper:operand { return oper }
-    / operand parameters
+    = oper:operand _ "(" _ args:arglist _ ")" _ { let locat = location();
+     return [(history, scope) => {
+            let part = oper[0](history, scope)
+            if (part[1] != undefined) {
+                return [consts.TYPE_UNDEFINED, part[1]]
+            }
+            let check = part[2]
+            if (check.params == undefined) {
+                return  [consts.TYPE_UNDEFINED, `${locat.start.line}:${locat.start.column} given expression is not callable`]
+            }
+            if (args.length != check.params.length) {
+                return [consts.TYPE_UNDEFINED, `${locat.start.line}:${locat.start.column} argument number expected ${check.params.length} got ${args.length}`]
+            }
+            for (let i = 0; i < check.params.length; i++) {
+                let err = args[i][0](history, scope)
+                if (err[1] != undefined) {
+                    return [consts.TYPE_UNDEFINED, err[1]]
+                }
+                if (err[0] != check.params[i][1]) {
+                    return [consts.TYPE_UNDEFINED, `${locat.start.line}:${locat.start.column} argument ${i} should be type ${check.params[i][1]}, got ${err[0]}`]
+                }
+            }
+            return [check.type, undefined]
+        }, (history, scope) => {
+            let value = oper[1](history, scope)
+            let argList = []
+            for (let i = 0; i < args.length; i ++) {
+                argList.push([value.params[i][0], value.params[i][1], args[i][1](history, scope).value])
+            }
+            blockStack.push("func")
+            let res = value.value(history, scope, argList)
+            blockStack.pop()
+            return res
+        }]}
+    / oper:operand _ "(" _ ")" _ { let locat = location();
+     return [(history, scope) => {
+            let part = oper[0](history, scope)
+            if (part[1] != undefined) {
+                return [consts.TYPE_UNDEFINED, part[1]]
+            }
+            let check = part[2]
+            if (check.params == undefined) {
+                return  [consts.TYPE_UNDEFINED, `${locat.start.line}:${locat.start.column} given expression is not callable`]
+            }
+            return [check.type, undefined]
+        }, (history, scope) => {
+            let value = oper[1](history, scope)
+            blockStack.push("func")
+            let res = value.value(history, scope, [])
+            blockStack.pop()
+            return res
+        }]}
+    / oper:operand { return oper }
+    
 
 index
     = "["_ expression _ "]"

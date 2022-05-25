@@ -1,0 +1,9 @@
+func abobus (str string) {
+	print str;
+	if (str == "abobus") {
+		return;
+	}
+	print " is not abobus";
+}
+var a string := input( );
+abobus(a);
