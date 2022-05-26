@@ -129,7 +129,7 @@
         return (history, scope) => {
             let val = exp[1](history, scope)
             if(val == undefined) {
-                return `${location.start.line}:${location.start.column} variable ${ident} is not defined`
+                return `${location.start.line}:${location.start.column} value to print is undefined`
             }
             console.log(val.value)
             return undefined
@@ -720,7 +720,7 @@ returnstatement
     / "return" _ exp:expression _ ";" { let locat = location();
         return [(history, scope) => {
             if(lastType == undefined) {
-                return `${location.start.line}:${location.start.column} function do not return anything`;
+                return `${locat.start.line}:${locat.start.column} function do not return anything`;
             }
             let val = exp[0](history,scope)
             if(val[1] != undefined) {
