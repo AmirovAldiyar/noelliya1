@@ -757,8 +757,8 @@ parameters
     / "("_")" { return []; }
 
 parameterlist
-    = parameter:parameter { return [parameter]; }
-    / param:parameter _ "," _ params:parameterlist { return [...params, param]; }
+    = param:parameter _ "," _ params:parameterlist { return [...params, param]; }
+    / parameter:parameter { return [parameter]; }
 
 parameter
     = ident:ident _ type:type { return [ident, type]; }

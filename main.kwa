@@ -7,6 +7,9 @@ func factorial(a int) int {
 	}
 	return factorial(a-1) * a;
 }
+func sum (a int, b int) int {
+	return a+b;
+}
 func main() {
 	var a int := 12;
 	print double(a+1);
@@ -18,6 +21,7 @@ func main() {
 	var name string := input();
 	print "your name is ";
 	print name;
+	print sum(123 ,123);
 }
 main();
 
