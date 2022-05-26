@@ -1,9 +1,23 @@
-func abobus (str string) {
-	print str;
-	if (str == "abobus") {
-		return;
-	}
-	print " is not abobus";
+func double(a int) int {
+	return a*2;
 }
-var a string := input( );
-abobus(a);
+func factorial(a int) int {
+	if (a == 0) {
+		return 1;
+	}
+	return factorial(a-1) * a;
+}
+func main() {
+	var a int := 12;
+	print double(a+1);
+	if (a == 26) {
+		print "a is 26";
+	}
+	print factorial(4);
+	print "what is your name";
+	var name string := input();
+	print "your name is ";
+	print name;
+}
+main();
+
